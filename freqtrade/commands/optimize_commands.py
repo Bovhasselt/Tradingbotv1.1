@@ -91,6 +91,7 @@ def start_hyperopt(args: Dict[str, Any]) -> None:
         # TODO: return False here in order to help freqtrade to exit
         # with non-zero exit code...
         # Same in Edge and Backtesting start() functions.
+        # S
 
 
 def start_edge(args: Dict[str, Any]) -> None:
