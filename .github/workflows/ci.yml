@@ -75,17 +75,17 @@ jobs:
         COVERALLS_REPO_TOKEN: 6D1m0xupS3FgutfuGao8keFf9Hc0FpIXu
       run: |
         # Allow failure for coveralls
-        coveralls -v  || true
+        coveralls || true
 
     - name: Backtesting
       run: |
-        cp config_bittrex.json.example config.json
+        cp config_examples/config_bittrex.example.json config.json
         freqtrade create-userdir --userdir user_data
         freqtrade backtesting --datadir tests/testdata --strategy SampleStrategy
 
     - name: Hyperopt
       run: |
-        cp config_bittrex.json.example config.json
+        cp config_examples/config_bittrex.example.json config.json
         freqtrade create-userdir --userdir user_data
         freqtrade hyperopt --datadir tests/testdata -e 5 --strategy SampleStrategy --hyperopt SampleHyperOpt --hyperopt-loss SharpeHyperOptLossDaily --print-all
 
@@ -172,13 +172,13 @@ jobs:
 
     - name: Backtesting
       run: |
-        cp config_bittrex.json.example config.json
+        cp config_examples/config_bittrex.example.json config.json
         freqtrade create-userdir --userdir user_data
         freqtrade backtesting --datadir tests/testdata --strategy SampleStrategy
 
     - name: Hyperopt
       run: |
-        cp config_bittrex.json.example config.json
+        cp config_examples/config_bittrex.example.json config.json
         freqtrade create-userdir --userdir user_data
         freqtrade hyperopt --datadir tests/testdata -e 5 --strategy SampleStrategy --hyperopt SampleHyperOpt --hyperopt-loss SharpeHyperOptLossDaily --print-all
 
@@ -239,13 +239,13 @@ jobs:
 
     - name: Backtesting
       run: |
-        cp config_bittrex.json.example config.json
+        cp config_examples/config_bittrex.example.json config.json
         freqtrade create-userdir --userdir user_data
         freqtrade backtesting --datadir tests/testdata --strategy SampleStrategy
 
     - name: Hyperopt
       run: |
-        cp config_bittrex.json.example config.json
+        cp config_examples/config_bittrex.example.json config.json
         freqtrade create-userdir --userdir user_data
         freqtrade hyperopt --datadir tests/testdata -e 5 --strategy SampleStrategy --hyperopt SampleHyperOpt --hyperopt-loss SharpeHyperOptLossDaily --print-all
 
@@ -301,7 +301,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - name: Cleanup previous runs on this branch
-      uses: rokroskar/workflow-run-cleanup-action@v0.3.2
+      uses: rokroskar/workflow-run-cleanup-action@v0.3.3
       if: "!startsWith(github.ref, 'refs/tags/') && github.ref != 'refs/heads/stable' && github.repository == 'freqtrade/freqtrade'"
       env:
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
@@ -334,6 +334,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'release') && github.repository == 'freqtrade/freqtrade'
+
     steps:
     - uses: actions/checkout@v2
 
@@ -374,13 +375,6 @@ jobs:
       run: |
         echo "${DOCKER_PASSWORD}" | docker login --username ${DOCKER_USERNAME} --password-stdin
 
-    - name: Build and test and push docker image
-      env:
-        IMAGE_NAME: freqtradeorg/freqtrade
-        BRANCH_NAME: ${{ steps.extract_branch.outputs.branch }}
-      run: |
-        build_helpers/publish_docker.sh
-
     # We need docker experimental to pull the ARM image.
     - name: Switch docker to experimental
       run: |
@@ -399,12 +393,12 @@ jobs:
     - name: Available platforms
       run: echo ${{ steps.buildx.outputs.platforms }}
 
-    - name: Build Raspberry docker image
+    - name: Build and test and push docker images
       env:
         IMAGE_NAME: freqtradeorg/freqtrade
-        BRANCH_NAME: ${{ steps.extract_branch.outputs.branch }}_pi
+        BRANCH_NAME: ${{ steps.extract_branch.outputs.branch }}
       run: |
-        build_helpers/publish_docker_pi.sh
+        build_helpers/publish_docker_multi.sh
 
 
     - name: Slack Notification
@@ -418,3 +412,31 @@ jobs:
         channel: '#notifications'
         url: ${{ secrets.SLACK_WEBHOOK }}
 
+
+  deploy_arm:
+    needs: [ deploy ]
+    # Only run on 64bit machines
+    runs-on: [self-hosted, linux, ARM64]
+    if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'release') && github.repository == 'freqtrade/freqtrade'
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Extract branch name
+      shell: bash
+      run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF##*/})"
+      id: extract_branch
+
+    - name: Dockerhub login
+      env:
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      run: |
+        echo "${DOCKER_PASSWORD}" | docker login --username ${DOCKER_USERNAME} --password-stdin
+
+    - name: Build and test and push docker images
+      env:
+        IMAGE_NAME: freqtradeorg/freqtrade
+        BRANCH_NAME: ${{ steps.extract_branch.outputs.branch }}
+      run: |
+        build_helpers/publish_docker_arm64.sh

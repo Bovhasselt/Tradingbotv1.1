@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class VolatilityFilter(IPairList):
-    '''
+    """
     Filters pairs by volatility
-    '''
+    """
 
     def __init__(self, exchange, pairlistmanager,
                  config: Dict[str, Any], pairlistconfig: Dict[str, Any],
@@ -69,10 +69,10 @@ class VolatilityFilter(IPairList):
         """
         needed_pairs = [(p, '1d') for p in pairlist if p not in self._pair_cache]
 
-        since_ms = int(arrow.utcnow()
-                       .floor('day')
-                       .shift(days=-self._days - 1)
-                       .float_timestamp) * 1000
+        since_ms = (arrow.utcnow()
+                         .floor('day')
+                         .shift(days=-self._days - 1)
+                         .int_timestamp) * 1000
         # Get all candles
         candles = {}
         if needed_pairs:
@@ -90,7 +90,7 @@ class VolatilityFilter(IPairList):
         """
         Validate trading range
         :param pair: Pair that's currently validated
-        :param ticker: ticker dict as returned from ccxt.load_markets()
+        :param ticker: ticker dict as returned from ccxt.fetch_tickers()
         :return: True if the pair can stay, false if it should be removed
         """
         # Check symbol in cache

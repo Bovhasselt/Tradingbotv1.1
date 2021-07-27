@@ -1,3 +1,4 @@
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional
@@ -21,6 +22,8 @@ from freqtrade.rpc.api_server.api_schemas import (AvailablePairs, Balances, Blac
 from freqtrade.rpc.api_server.deps import get_config, get_rpc, get_rpc_optional
 from freqtrade.rpc.rpc import RPCException
 
+
+logger = logging.getLogger(__name__)
 
 # Public API, requires no auth.
 router_public = APIRouter()
@@ -85,8 +88,8 @@ def status(rpc: RPC = Depends(get_rpc)):
 # Using the responsemodel here will cause a ~100% increase in response time (from 1s to 2s)
 # on big databases. Correct response model: response_model=TradeResponse,
 @router.get('/trades', tags=['info', 'trading'])
-def trades(limit: int = 0, rpc: RPC = Depends(get_rpc)):
-    return rpc._rpc_trade_history(limit)
+def trades(limit: int = 500, offset: int = 0, rpc: RPC = Depends(get_rpc)):
+    return rpc._rpc_trade_history(limit, offset=offset, order_by_id=True)
 
 
 @router.get('/trade/{tradeid}', response_model=OpenTradeSchema, tags=['info', 'trading'])
@@ -162,8 +165,8 @@ def delete_lock_pair(payload: DeleteLockRequest, rpc: RPC = Depends(get_rpc)):
 
 
 @router.get('/logs', response_model=Logs, tags=['info'])
-def logs(limit: Optional[int] = None, rpc: RPC = Depends(get_rpc)):
-    return rpc._rpc_get_logs(limit)
+def logs(limit: Optional[int] = None):
+    return RPC._rpc_get_logs(limit)
 
 
 @router.post('/start', response_model=StatusMsg, tags=['botcontrol'])
@@ -249,7 +252,7 @@ def list_available_pairs(timeframe: Optional[str] = None, stake_currency: Option
     pair_interval = sorted(pair_interval, key=lambda x: x[0])
 
     pairs = list({x[0] for x in pair_interval})
-
+    pairs.sort()
     result = {
         'length': len(pairs),
         'pairs': pairs,

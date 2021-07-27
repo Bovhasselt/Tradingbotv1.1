@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import arrow
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from freqtrade import constants
 from freqtrade.exceptions import DependencyException, OperationalException
@@ -486,9 +486,10 @@ def test_migrate_old(mocker, default_conf, fee):
     mocker.patch('freqtrade.persistence.models.create_engine', lambda *args, **kwargs: engine)
 
     # Create table using the old format
-    engine.execute(create_table_old)
-    engine.execute(insert_table_old)
-    engine.execute(insert_table_old2)
+    with engine.begin() as connection:
+        connection.execute(text(create_table_old))
+        connection.execute(text(insert_table_old))
+        connection.execute(text(insert_table_old2))
     # Run init to test migration
     init_db(default_conf['db_url'], default_conf['dry_run'])
 
@@ -579,15 +580,16 @@ def test_migrate_new(mocker, default_conf, fee, caplog):
     mocker.patch('freqtrade.persistence.models.create_engine', lambda *args, **kwargs: engine)
 
     # Create table using the old format
-    engine.execute(create_table_old)
-    engine.execute("create index ix_trades_is_open on trades(is_open)")
-    engine.execute("create index ix_trades_pair on trades(pair)")
-    engine.execute(insert_table_old)
+    with engine.begin() as connection:
+        connection.execute(text(create_table_old))
+        connection.execute(text("create index ix_trades_is_open on trades(is_open)"))
+        connection.execute(text("create index ix_trades_pair on trades(pair)"))
+        connection.execute(text(insert_table_old))
 
-    # fake previous backup
-    engine.execute("create table trades_bak as select * from trades")
+        # fake previous backup
+        connection.execute(text("create table trades_bak as select * from trades"))
 
-    engine.execute("create table trades_bak1 as select * from trades")
+        connection.execute(text("create table trades_bak1 as select * from trades"))
     # Run init to test migration
     init_db(default_conf['db_url'], default_conf['dry_run'])
 
@@ -619,6 +621,65 @@ def test_migrate_new(mocker, default_conf, fee, caplog):
     assert trade.close_profit_abs is None
 
     assert log_has("Moving open orders to Orders table.", caplog)
+    orders = Order.query.all()
+    assert len(orders) == 2
+    assert orders[0].order_id == 'buy_order'
+    assert orders[0].ft_order_side == 'buy'
+
+    assert orders[1].order_id == 'stop_order_id222'
+    assert orders[1].ft_order_side == 'stoploss'
+
+    caplog.clear()
+    # Drop latest column
+    with engine.begin() as connection:
+        connection.execute(text("alter table orders rename to orders_bak"))
+    inspector = inspect(engine)
+
+    with engine.begin() as connection:
+        for index in inspector.get_indexes('orders_bak'):
+            connection.execute(text(f"drop index {index['name']}"))
+        # Recreate table
+        connection.execute(text("""
+            CREATE TABLE orders (
+                id INTEGER NOT NULL,
+                ft_trade_id INTEGER,
+                ft_order_side VARCHAR NOT NULL,
+                ft_pair VARCHAR NOT NULL,
+                ft_is_open BOOLEAN NOT NULL,
+                order_id VARCHAR NOT NULL,
+                status VARCHAR,
+                symbol VARCHAR,
+                order_type VARCHAR,
+                side VARCHAR,
+                price FLOAT,
+                amount FLOAT,
+                filled FLOAT,
+                remaining FLOAT,
+                cost FLOAT,
+                order_date DATETIME,
+                order_filled_date DATETIME,
+                order_update_date DATETIME,
+                PRIMARY KEY (id),
+                CONSTRAINT _order_pair_order_id UNIQUE (ft_pair, order_id),
+                FOREIGN KEY(ft_trade_id) REFERENCES trades (id)
+            )
+            """))
+
+        connection.execute(text("""
+        insert into orders ( id, ft_trade_id, ft_order_side, ft_pair, ft_is_open, order_id, status,
+            symbol, order_type, side, price, amount, filled, remaining, cost, order_date,
+            order_filled_date, order_update_date)
+            select id, ft_trade_id, ft_order_side, ft_pair, ft_is_open, order_id, status,
+            symbol, order_type, side, price, amount, filled, remaining, cost, order_date,
+            order_filled_date, order_update_date
+            from orders_bak
+        """))
+
+    # Run init to test migration
+    init_db(default_conf['db_url'], default_conf['dry_run'])
+
+    assert log_has("trying orders_bak1", caplog)
+
     orders = Order.query.all()
     assert len(orders) == 2
     assert orders[0].order_id == 'buy_order'
@@ -665,8 +726,9 @@ def test_migrate_mid_state(mocker, default_conf, fee, caplog):
     mocker.patch('freqtrade.persistence.models.create_engine', lambda *args, **kwargs: engine)
 
     # Create table using the old format
-    engine.execute(create_table_old)
-    engine.execute(insert_table_old)
+    with engine.begin() as connection:
+        connection.execute(text(create_table_old))
+        connection.execute(text(insert_table_old))
 
     # Run init to test migration
     init_db(default_conf['db_url'], default_conf['dry_run'])
@@ -774,10 +836,15 @@ def test_adjust_min_max_rates(fee):
 
 
 @pytest.mark.usefixtures("init_persistence")
-def test_get_open(fee):
+@pytest.mark.parametrize('use_db', [True, False])
+def test_get_open(fee, use_db):
+    Trade.use_db = use_db
+    Trade.reset_trades()
 
-    create_mock_trades(fee)
+    create_mock_trades(fee, use_db)
     assert len(Trade.get_open_trades()) == 4
+
+    Trade.use_db = True
 
 
 @pytest.mark.usefixtures("init_persistence")
@@ -1059,6 +1126,21 @@ def test_total_open_trades_stakes(fee, use_db):
 
 @pytest.mark.usefixtures("init_persistence")
 @pytest.mark.parametrize('use_db', [True, False])
+def test_get_total_closed_profit(fee, use_db):
+
+    Trade.use_db = use_db
+    Trade.reset_trades()
+    res = Trade.get_total_closed_profit()
+    assert res == 0
+    create_mock_trades(fee, use_db)
+    res = Trade.get_total_closed_profit()
+    assert res == 0.000739127
+
+    Trade.use_db = True
+
+
+@pytest.mark.usefixtures("init_persistence")
+@pytest.mark.parametrize('use_db', [True, False])
 def test_get_trades_proxy(fee, use_db):
     Trade.use_db = use_db
     Trade.reset_trades()
@@ -1080,6 +1162,13 @@ def test_get_trades_proxy(fee, use_db):
 
     assert len(Trade.get_trades_proxy(open_date=opendate)) == 3
 
+    Trade.use_db = True
+
+
+def test_get_trades_backtest():
+    Trade.use_db = False
+    with pytest.raises(NotImplementedError, match=r"`Trade.get_trades\(\)` not .*"):
+        Trade.get_trades([])
     Trade.use_db = True
 
 
@@ -1216,11 +1305,26 @@ def test_Trade_object_idem():
     trade = vars(Trade)
     localtrade = vars(LocalTrade)
 
+    excludes = (
+        'delete',
+        'session',
+        'commit',
+        'query',
+        'open_date',
+        'get_best_pair',
+        'get_overall_performance',
+        'get_total_closed_profit',
+        'total_open_trades_stakes',
+        'get_sold_trades_without_assigned_fees',
+        'get_open_trades_without_assigned_fees',
+        'get_open_order_trades',
+        'get_trades',
+        )
+
     # Parent (LocalTrade) should have the same attributes
     for item in trade:
         # Exclude private attributes and open_date (as it's not assigned a default)
-        if (not item.startswith('_')
-                and item not in ('delete', 'session', 'query', 'open_date')):
+        if (not item.startswith('_') and item not in excludes):
             assert item in localtrade
 
     # Fails if only a column is added without corresponding parent field

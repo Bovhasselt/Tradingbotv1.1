@@ -19,7 +19,7 @@ class PerformanceFilter(IPairList):
     def needstickers(self) -> bool:
         """
         Boolean property defining if tickers are necessary.
-        If no Pairlist requries tickers, an empty List is passed
+        If no Pairlist requires tickers, an empty List is passed
         as tickers argument to filter_pairlist
         """
         return False
@@ -39,7 +39,12 @@ class PerformanceFilter(IPairList):
         :return: new allowlist
         """
         # Get the trading performance for pairs from database
-        performance = pd.DataFrame(Trade.get_overall_performance())
+        try:
+            performance = pd.DataFrame(Trade.get_overall_performance())
+        except AttributeError:
+            # Performancefilter does not work in backtesting.
+            self.log_once("PerformanceFilter is not available in this mode.", logger.warning)
+            return pairlist
 
         # Skip performance-based sorting if no performance data is available
         if len(performance) == 0:

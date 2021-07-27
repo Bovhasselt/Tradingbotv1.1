@@ -8,11 +8,11 @@ from freqtrade.configuration import TimeRange, setup_utils_configuration
 from freqtrade.data.converter import convert_ohlcv_format, convert_trades_format
 from freqtrade.data.history import (convert_trades_to_ohlcv, refresh_backtest_ohlcv_data,
                                     refresh_backtest_trades_data)
+from freqtrade.enums import RunMode
 from freqtrade.exceptions import OperationalException
 from freqtrade.exchange import timeframe_to_minutes
 from freqtrade.plugins.pairlist.pairlist_helpers import expand_pairlist
 from freqtrade.resolvers import ExchangeResolver
-from freqtrade.state import RunMode
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,8 @@ def start_download_data(args: Dict[str, Any]) -> None:
     # Init exchange
     exchange = ExchangeResolver.load_exchange(config['exchange']['name'], config, validate=False)
     # Manual validations of relevant settings
-    exchange.validate_pairs(config['pairs'])
+    if not config['exchange'].get('skip_pair_validation', False):
+        exchange.validate_pairs(config['pairs'])
     expanded_pairs = expand_pairlist(config['pairs'], list(exchange.markets))
 
     logger.info(f"About to download pairs: {expanded_pairs}, "
@@ -62,8 +63,8 @@ def start_download_data(args: Dict[str, Any]) -> None:
         if config.get('download_trades'):
             pairs_not_available = refresh_backtest_trades_data(
                 exchange, pairs=expanded_pairs, datadir=config['datadir'],
-                timerange=timerange, erase=bool(config.get('erase')),
-                data_format=config['dataformat_trades'])
+                timerange=timerange, new_pairs_days=config['new_pairs_days'],
+                erase=bool(config.get('erase')), data_format=config['dataformat_trades'])
 
             # Convert downloaded trade data to different timeframes
             convert_trades_to_ohlcv(
@@ -75,8 +76,9 @@ def start_download_data(args: Dict[str, Any]) -> None:
         else:
             pairs_not_available = refresh_backtest_ohlcv_data(
                 exchange, pairs=expanded_pairs, timeframes=config['timeframes'],
-                datadir=config['datadir'], timerange=timerange, erase=bool(config.get('erase')),
-                data_format=config['dataformat_ohlcv'])
+                datadir=config['datadir'], timerange=timerange,
+                new_pairs_days=config['new_pairs_days'],
+                erase=bool(config.get('erase')), data_format=config['dataformat_ohlcv'])
 
     except KeyboardInterrupt:
         sys.exit("SIGINT received, aborting ...")

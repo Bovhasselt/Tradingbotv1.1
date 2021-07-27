@@ -200,13 +200,19 @@ class FtRestClient():
         """
         return self._get("logs", params={"limit": limit} if limit else 0)
 
-    def trades(self, limit=None):
-        """Return trades history.
+    def trades(self, limit=None, offset=None):
+        """Return trades history, sorted by id
 
-        :param limit: Limits trades to the X last trades. No limit to get all the trades.
+        :param limit: Limits trades to the X last trades. Max 500 trades.
+        :param offset: Offset by this amount of trades.
         :return: json object
         """
-        return self._get("trades", params={"limit": limit} if limit else 0)
+        params = {}
+        if limit:
+            params['limit'] = limit
+        if offset:
+            params['offset'] = offset
+        return self._get("trades", params)
 
     def trade(self, trade_id):
         """Return specific trade
@@ -390,7 +396,7 @@ def main(args):
         sys.exit()
 
     config = load_config(args['config'])
-    url = config.get('api_server', {}).get('server_url', '127.0.0.1')
+    url = config.get('api_server', {}).get('listen_ip_address', '127.0.0.1')
     port = config.get('api_server', {}).get('listen_port', '8080')
     username = config.get('api_server', {}).get('username')
     password = config.get('api_server', {}).get('password')

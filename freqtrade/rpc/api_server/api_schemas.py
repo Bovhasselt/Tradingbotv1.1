@@ -57,6 +57,7 @@ class Count(BaseModel):
 class PerformanceEntry(BaseModel):
     pair: str
     profit: float
+    profit_abs: float
     count: int
 
 
@@ -66,12 +67,16 @@ class Profit(BaseModel):
     profit_closed_ratio_mean: float
     profit_closed_percent_sum: float
     profit_closed_ratio_sum: float
+    profit_closed_percent: float
+    profit_closed_ratio: float
     profit_closed_fiat: float
     profit_all_coin: float
     profit_all_percent_mean: float
     profit_all_ratio_mean: float
     profit_all_percent_sum: float
     profit_all_ratio_sum: float
+    profit_all_percent: float
+    profit_all_ratio: float
     profit_all_fiat: float
     trade_count: int
     closed_trade_count: int
@@ -114,19 +119,21 @@ class ShowConfig(BaseModel):
     dry_run: bool
     stake_currency: str
     stake_amount: Union[float, str]
+    available_capital: Optional[float]
+    stake_currency_decimals: int
     max_open_trades: int
     minimal_roi: Dict[str, Any]
-    stoploss: float
-    trailing_stop: bool
+    stoploss: Optional[float]
+    trailing_stop: Optional[bool]
     trailing_stop_positive: Optional[float]
     trailing_stop_positive_offset: Optional[float]
     trailing_only_offset_is_reached: Optional[bool]
     use_custom_stoploss: Optional[bool]
-    timeframe: str
+    timeframe: Optional[str]
     timeframe_ms: int
     timeframe_min: int
     exchange: str
-    strategy: str
+    strategy: Optional[str]
     forcebuy_enabled: bool
     ask_strategy: Dict[str, Any]
     bid_strategy: Dict[str, Any]
@@ -199,6 +206,7 @@ class OpenTradeSchema(TradeSchema):
 class TradeResponse(BaseModel):
     trades: List[TradeSchema]
     trades_count: int
+    total_trades: int
 
 
 class ForceBuyResponse(BaseModel):
@@ -267,7 +275,7 @@ class DeleteTrade(BaseModel):
 
 class PlotConfig_(BaseModel):
     main_plot: Dict[str, Any]
-    subplots: Optional[Dict[str, Any]]
+    subplots: Dict[str, Any]
 
 
 class PlotConfig(BaseModel):
@@ -310,3 +318,24 @@ class PairHistory(BaseModel):
         json_encoders = {
             datetime: lambda v: v.strftime(DATETIME_PRINT_FORMAT),
         }
+
+
+class BacktestRequest(BaseModel):
+    strategy: str
+    timeframe: Optional[str]
+    timerange: Optional[str]
+    max_open_trades: Optional[int]
+    stake_amount: Optional[Union[float, str]]
+    enable_protections: bool
+    dry_run_wallet: Optional[float]
+
+
+class BacktestResponse(BaseModel):
+    status: str
+    running: bool
+    status_msg: str
+    step: str
+    progress: float
+    trade_count: Optional[float]
+    # TODO: Properly type backtestresult...
+    backtest_result: Optional[Dict[str, Any]]

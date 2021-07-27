@@ -329,7 +329,7 @@ class SampleStrategy(IStrategy):
         """
         # first check if dataprovider is available
         if self.dp:
-            if self.dp.runmode in ('live', 'dry_run'):
+            if self.dp.runmode.value in ('live', 'dry_run'):
                 ob = self.dp.orderbook(metadata['pair'], 1)
                 dataframe['best_bid'] = ob['bids'][0][0]
                 dataframe['best_ask'] = ob['asks'][0][0]
@@ -361,7 +361,7 @@ class SampleStrategy(IStrategy):
         Based on TA indicators, populates the sell signal for the given dataframe
         :param dataframe: DataFrame populated with indicators
         :param metadata: Additional information, like the currently traded pair
-        :return: DataFrame with buy column
+        :return: DataFrame with sell column
         """
         dataframe.loc[
             (

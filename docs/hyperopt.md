@@ -51,7 +51,7 @@ usage: freqtrade hyperopt [-h] [-v] [--logfile FILE] [-V] [-c PATH] [-d PATH]
                           [--spaces {all,buy,sell,roi,stoploss,trailing,default} [{all,buy,sell,roi,stoploss,trailing,default} ...]]
                           [--print-all] [--no-color] [--print-json] [-j JOBS]
                           [--random-state INT] [--min-trades INT]
-                          [--hyperopt-loss NAME]
+                          [--hyperopt-loss NAME] [--disable-param-export]
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -118,6 +118,8 @@ optional arguments:
                         ShortTradeDurHyperOptLoss, OnlyProfitHyperOptLoss,
                         SharpeHyperOptLoss, SharpeHyperOptLossDaily,
                         SortinoHyperOptLoss, SortinoHyperOptLossDaily
+  --disable-param-export
+                        Disable automatic hyperopt parameter export.
 
 Common arguments:
   -v, --verbose         Verbose mode (-vv for more, -vvv to get all messages).
@@ -165,10 +167,21 @@ Rarely you may also need to create a [nested class](advanced-hyperopt.md#overrid
 !!! Tip "Quickly optimize ROI, stoploss and trailing stoploss"
     You can quickly optimize the spaces `roi`, `stoploss` and `trailing` without changing anything in your strategy.
 
-    ```python
+    ``` bash
     # Have a working strategy at hand.
     freqtrade hyperopt --hyperopt-loss SharpeHyperOptLossDaily --spaces roi stoploss trailing --strategy MyWorkingStrategy --config config.json -e 100
     ```
+
+### Hyperopt execution logic
+
+Hyperopt will first load your data into memory and will then run `populate_indicators()` once per Pair to generate all indicators.
+
+Hyperopt will then spawn into different processes (number of processors, or `-j <n>`), and run backtesting over and over again, changing the parameters that are part of the `--spaces` defined.
+
+For every new set of parameters, freqtrade will run first `populate_buy_trend()` followed by `populate_sell_trend()`, and then run the regular backtesting process to simulate trades.
+
+After backtesting, the results are passed into the [loss function](#loss-functions), which will evaluate if this result was better or worse than previous results.  
+Based on the loss function result, hyperopt will determine the next set of parameters to try in the next round of backtesting.
 
 ### Configure your Guards and Triggers
 
@@ -187,75 +200,74 @@ There you have two different types of indicators: 1. `guards` and 2. `triggers`.
     However, this guide will make this distinction to make it clear that signals should not be "sticking".
     Sticking signals are signals that are active for multiple candles. This can lead into buying a signal late (right before the signal disappears - which means that the chance of success is a lot lower than right at the beginning).
 
-Hyper-optimization will, for each epoch round, pick one trigger and possibly
-multiple guards. The constructed strategy will be something like "*buy exactly when close price touches lower Bollinger band, BUT only if
-ADX > 10*".
-
-```python
-from freqtrade.strategy import IntParameter, IStrategy
-
-class MyAwesomeStrategy(IStrategy):
-    # If parameter is prefixed with `buy_` or `sell_` then specifying `space` parameter is optional
-    # and space is inferred from parameter name.
-    buy_adx_min = IntParameter(0, 100, default=10)
-
-    def populate_buy_trend(self, dataframe: 'DataFrame', metadata: dict) -> 'DataFrame':
-        dataframe.loc[
-            (
-                (dataframe['adx'] > self.buy_adx_min.value)
-            ), 'buy'] = 1
-        return dataframe
-```
+Hyper-optimization will, for each epoch round, pick one trigger and possibly multiple guards.
 
 #### Sell optimization
 
 Similar to the buy-signal above, sell-signals can also be optimized.
 Place the corresponding settings into the following methods
 
-* Define the parameters at the class level hyperopt shall be optimizing.
+* Define the parameters at the class level hyperopt shall be optimizing, either naming them `sell_*`, or by explicitly defining `space='sell'`.
 * Within `populate_sell_trend()` - use defined parameter values instead of raw constants.
 
 The configuration and rules are the same than for buy signals.
 
-```python
-class MyAwesomeStrategy(IStrategy):
-    # There is no strict parameter naming scheme. If you do not use `buy_` or `sell_` prefixes - 
-    # please specify to which space parameter belongs using `space` parameter. Possible values: 
-    # 'buy' or 'sell'.
-    adx_max = IntParameter(0, 100, default=50, space='sell')
+## Solving a Mystery
 
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            (
-                (dataframe['adx'] < self.adx_max.value)
-            ), 'buy'] = 1
+Let's say you are curious: should you use MACD crossings or lower Bollinger Bands to trigger your buys. 
+And you also wonder should you use RSI or ADX to help with those buy decisions. 
+If you decide to use RSI or ADX, which values should I use for them? 
+
+So let's use hyperparameter optimization to solve this mystery.
+
+### Defining indicators to be used
+
+We start by calculating the indicators our strategy is going to use.
+
+``` python
+class MyAwesomeStrategy(IStrategy):
+
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        """
+        Generate all indicators used by the strategy
+        """
+        dataframe['adx'] = ta.ADX(dataframe)
+        dataframe['rsi'] = ta.RSI(dataframe)
+        macd = ta.MACD(dataframe)
+        dataframe['macd'] = macd['macd']
+        dataframe['macdsignal'] = macd['macdsignal']
+        dataframe['macdhist'] = macd['macdhist']
+
+        bollinger = ta.BBANDS(dataframe, timeperiod=20, nbdevup=2.0, nbdevdn=2.0)
+        dataframe['bb_lowerband'] = bollinger['lowerband']
+        dataframe['bb_middleband'] = bollinger['middleband']
+        dataframe['bb_upperband'] = bollinger['upperband']
         return dataframe
 ```
 
-## Solving a Mystery
+### Hyperoptable parameters
 
-Let's say you are curious: should you use MACD crossings or lower Bollinger
-Bands to trigger your buys. And you also wonder should you use RSI or ADX to
-help with those buy decisions. If you decide to use RSI or ADX, which values
-should I use for them? So let's use hyperparameter optimization to solve this
-mystery.
-
-We will start by defining hyperoptable parameters:
+We continue to define hyperoptable parameters:
 
 ```python
 class MyAwesomeStrategy(IStrategy):
-    buy_adx = IntParameter(20, 40, default=30)
-    buy_rsi = IntParameter(20, 40, default=30)
-    buy_adx_enabled = CategoricalParameter([True, False]),
-    buy_rsi_enabled = CategoricalParameter([True, False]),
-    buy_trigger = CategoricalParameter(['bb_lower', 'macd_cross_signal']),
+    buy_adx = DecimalParameter(20, 40, decimals=1, default=30.1, space="buy")
+    buy_rsi = IntParameter(20, 40, default=30, space="buy")
+    buy_adx_enabled = CategoricalParameter([True, False], default=True, space="buy")
+    buy_rsi_enabled = CategoricalParameter([True, False], default=False, space="buy")
+    buy_trigger = CategoricalParameter(["bb_lower", "macd_cross_signal"], default="bb_lower", space="buy")
 ```
 
-Above definition says: I have five parameters I want to randomly combine to find the best combination.
-Two of them are integer values (`buy_adx` and `buy_rsi`) and I want you test in the range of values 20 to 40.  
+The above definition says: I have five parameters I want to randomly combine to find the best combination.  
+`buy_rsi` is an integer parameter, which will be tested between 20 and 40. This space has a size of 20.  
+`buy_adx` is a decimal parameter, which will be evaluated between 20 and 40 with 1 decimal place (so values are 20.1, 20.2, ...). This space has a size of 200.  
 Then we have three category variables. First two are either `True` or `False`.
 We use these to either enable or disable the ADX and RSI guards.
 The last one we call `trigger` and use it to decide which buy trigger we want to use.
+
+!!! Note "Parameter space assignment"
+    Parameters must either be assigned to a variable named `buy_*` or `sell_*` - or contain `space='buy'` | `space='sell'` to be assigned to a space correctly.
+    If no parameter is available for a space, you'll receive the error that no space was found when running hyperopt.
 
 So let's write the buy strategy using these values:
 
@@ -288,7 +300,7 @@ So let's write the buy strategy using these values:
 ```
 
 Hyperopt will now call `populate_buy_trend()` many times (`epochs`) with different value combinations.  
-It will use the given historical data and make buys based on the buy signals generated with the above function.  
+It will use the given historical data and simulate buys based on the buy signals generated with the above function.  
 Based on the results, hyperopt will tell you which parameter combination produced the best results (based on the configured [loss function](#loss-functions)).
 
 !!! Note
@@ -313,6 +325,93 @@ There are four parameter types each suited for different purposes.
 
 !!! Warning
     Hyperoptable parameters cannot be used in `populate_indicators` - as hyperopt does not recalculate indicators for each epoch, so the starting value would be used in this case.
+
+### Optimizing an indicator parameter
+
+Assuming you have a simple strategy in mind - a EMA cross strategy (2 Moving averages crossing) - and you'd like to find the ideal parameters for this strategy.
+
+``` python
+from pandas import DataFrame
+from functools import reduce
+
+import talib.abstract as ta
+
+from freqtrade.strategy import IStrategy
+from freqtrade.strategy import CategoricalParameter, DecimalParameter, IntParameter
+import freqtrade.vendor.qtpylib.indicators as qtpylib
+
+class MyAwesomeStrategy(IStrategy):
+    stoploss = -0.05
+    timeframe = '15m'
+    # Define the parameter spaces
+    buy_ema_short = IntParameter(3, 50, default=5)
+    buy_ema_long = IntParameter(15, 200, default=50)
+
+
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        """Generate all indicators used by the strategy"""
+        
+        # Calculate all ema_short values
+        for val in self.buy_ema_short.range:
+            dataframe[f'ema_short_{val}'] = ta.EMA(dataframe, timeperiod=val)
+        
+        # Calculate all ema_long values
+        for val in self.buy_ema_long.range:
+            dataframe[f'ema_long_{val}'] = ta.EMA(dataframe, timeperiod=val)
+        
+        return dataframe
+
+    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        conditions = []
+        conditions.append(qtpylib.crossed_above(
+                dataframe[f'ema_short_{self.buy_ema_short.value}'], dataframe[f'ema_long_{self.buy_ema_long.value}']
+            ))
+
+        # Check that volume is not 0
+        conditions.append(dataframe['volume'] > 0)
+
+        if conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, conditions),
+                'buy'] = 1
+        return dataframe
+
+    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        conditions = []
+        conditions.append(qtpylib.crossed_above(
+                dataframe[f'ema_long_{self.buy_ema_long.value}'], dataframe[f'ema_short_{self.buy_ema_short.value}']
+            ))
+
+        # Check that volume is not 0
+        conditions.append(dataframe['volume'] > 0)
+
+        if conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x & y, conditions),
+                'sell'] = 1
+        return dataframe
+```
+
+Breaking it down:
+
+Using `self.buy_ema_short.range` will return a range object containing all entries between the Parameters low and high value.
+In this case (`IntParameter(3, 50, default=5)`), the loop would run for all numbers between 3 and 50 (`[3, 4, 5, ... 49, 50]`).
+By using this in a loop, hyperopt will generate 48 new columns (`['buy_ema_3', 'buy_ema_4', ... , 'buy_ema_50']`).
+
+Hyperopt itself will then use the selected value to create the buy and sell signals
+
+While this strategy is most likely too simple to provide consistent profit, it should serve as an example how optimize indicator parameters.
+
+!!! Note
+    `self.buy_ema_short.range` will act differently between hyperopt and other modes. For hyperopt, the above example may generate 48 new columns, however for all other modes (backtesting, dry/live), it will only generate the column for the selected value. You should therefore avoid using the resulting column with explicit values (values other than `self.buy_ema_short.value`).
+
+!!! Note
+    `range` property may also be used with `DecimalParameter` and `CategoricalParameter`. `RealParameter` does not provide this property due to infinite search space.
+
+??? Hint "Performance tip"
+    By doing the calculation of all possible indicators in `populate_indicators()`, the calculation of the indicator happens only once for every parameter.  
+    While this may slow down the hyperopt startup speed, the overall performance will increase as the Hyperopt execution itself may pick the same value for multiple epochs (changing other values).
+    You should however try to use space ranges as small as possible. Every new column will require more memory, and every possibility hyperopt can try will increase the search space.
 
 ## Loss-functions
 
@@ -397,7 +496,7 @@ Given the following result from hyperopt:
 ```
 Best result:
 
-    44/100:    135 trades. Avg profit  0.57%. Total profit  0.03871918 BTC (0.7722Σ%). Avg duration 180.4 mins. Objective: 1.94367
+    44/100:    135 trades. Avg profit  0.57%. Total profit  0.03871918 BTC (0.7722%). Avg duration 180.4 mins. Objective: 1.94367
 
     # Buy hyperspace params:
     buy_params = {
@@ -415,7 +514,13 @@ You should understand this result like:
 * You should not use ADX because `'buy_adx_enabled': False`.
 * You should **consider** using the RSI indicator (`'buy_rsi_enabled': True`) and the best value is `29.0` (`'buy_rsi': 29.0`)
 
-Your strategy class can immediately take advantage of these results. Simply copy hyperopt results block and paste them at class level, replacing old parameters (if any). New parameters will automatically be loaded next time strategy is executed.
+### Automatic parameter application to the strategy
+
+When using Hyperoptable parameters, the result of your hyperopt-run will be written to a json file next to your strategy (so for `MyAwesomeStrategy.py`, the file would be `MyAwesomeStrategy.json`).  
+This file is also updated when using the `hyperopt-show` sub-command, unless `--disable-param-export` is provided to either of the 2 commands.
+
+
+Your strategy class can also contain these results explicitly. Simply copy hyperopt results block and paste them at class level, replacing old parameters (if any). New parameters will automatically be loaded next time strategy is executed.
 
 Transferring your whole hyperopt result to your strategy would then look like:
 
@@ -431,6 +536,10 @@ class MyAwesomeStrategy(IStrategy):
     }
 ```
 
+!!! Note
+    Values in the configuration file will overwrite Parameter-file level parameters - and both will overwrite parameters within the strategy.
+    The prevalence is therefore: config > parameter file > strategy
+
 ### Understand Hyperopt ROI results
 
 If you are optimizing ROI (i.e. if optimization search-space contains 'all', 'default' or 'roi'), your result will look as follows and include a ROI table:
@@ -438,7 +547,7 @@ If you are optimizing ROI (i.e. if optimization search-space contains 'all', 'de
 ```
 Best result:
 
-    44/100:    135 trades. Avg profit  0.57%. Total profit  0.03871918 BTC (0.7722Σ%). Avg duration 180.4 mins. Objective: 1.94367
+    44/100:    135 trades. Avg profit  0.57%. Total profit  0.03871918 BTC (0.7722%). Avg duration 180.4 mins. Objective: 1.94367
 
     # ROI table:
     minimal_roi = {
@@ -493,7 +602,7 @@ If you are optimizing stoploss values (i.e. if optimization search-space contain
 ```
 Best result:
 
-    44/100:    135 trades. Avg profit  0.57%. Total profit  0.03871918 BTC (0.7722Σ%). Avg duration 180.4 mins. Objective: 1.94367
+    44/100:    135 trades. Avg profit  0.57%. Total profit  0.03871918 BTC (0.7722%). Avg duration 180.4 mins. Objective: 1.94367
 
     # Buy hyperspace params:
     buy_params = {
@@ -535,7 +644,7 @@ If you are optimizing trailing stop values (i.e. if optimization search-space co
 ```
 Best result:
 
-    45/100:    606 trades. Avg profit  1.04%. Total profit  0.31555614 BTC ( 630.48Σ%). Avg duration 150.3 mins. Objective: -1.10161
+    45/100:    606 trades. Avg profit  1.04%. Total profit  0.31555614 BTC ( 630.48%). Avg duration 150.3 mins. Objective: -1.10161
 
     # Trailing stop:
     trailing_stop = True
@@ -605,6 +714,16 @@ number).
 
 You can also enable position stacking in the configuration file by explicitly setting
 `"position_stacking"=true`.
+
+## Out of Memory errors
+
+As hyperopt consumes a lot of memory (the complete data needs to be in memory once per parallel backtesting process), it's likely that you run into "out of memory" errors.
+To combat these, you have multiple options:
+
+* reduce the amount of pairs
+* reduce the timerange used (`--timerange <timerange>`)
+* reduce the number of parallel processes (`-j <n>`)
+* Increase the memory of your machine
 
 ## Show details of Hyperopt results
 
