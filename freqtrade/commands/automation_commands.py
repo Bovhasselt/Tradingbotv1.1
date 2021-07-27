@@ -106,7 +106,7 @@ def extract_lists(strategypath: Path) -> None:
     # build the final lists
     buy_info_list = get_indicator_info(stored_file, buyindicators)
     sell_info_list = get_indicator_info(stored_file, sellindicators)
-    
+
     # put the final lists into a tuple
     final_lists = (buy_info_list, sell_info_list)
 
@@ -157,7 +157,7 @@ def custom_hyperopt_buyelements(buy_indicators: List):
         aim = indicator_info[1]
         usage = indicator_info[2]
 
-        #If the indicator is a CDL indicator
+        # If the indicator is a CDL indicator
         if indicator[:3] == "CDL":
 
             # add the triggers to its argument
@@ -167,7 +167,7 @@ def custom_hyperopt_buyelements(buy_indicators: List):
         # If the indicator is a guard
         elif usage == "guard":
             value = indicator_info[3]
-            
+
             if value >= -1.0 and value <= 1.0:
                 lower_bound = value - 0.3
                 upper_bound = value + 0.3
@@ -221,7 +221,7 @@ def custom_hyperopt_sellelements(sell_indicators: Dict[str, str]):
         aim = indicator_info[1]
         usage = indicator_info[2]
 
-        #If the indicator is a CDL indicator
+        # If the indicator is a CDL indicator
         if indicator[:3] == "CDL":
 
             # add the triggers to its argument
@@ -231,7 +231,7 @@ def custom_hyperopt_sellelements(sell_indicators: Dict[str, str]):
         # If the indicator is a guard
         if usage == "guard":
             value = indicator_info[3]
-            
+
             if value >= -1 and value <= 1:
                 lower_bound = value - 0.3
                 upper_bound = value + 0.3

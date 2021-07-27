@@ -280,7 +280,7 @@ AVAILABLE_CLI_OPTIONS = {
         'Example: `--hyperopt-filename=hyperopt_results_2020-09-27_16-20-48.pickle`',
         metavar='FILENAME',
     ),
-    # Automation 
+    # Automation
     "buy_indicators": Arg(
         '-b', '--buy-indicators',
         help='Specify the buy indicators the hyperopt should build. '
@@ -299,6 +299,26 @@ AVAILABLE_CLI_OPTIONS = {
         '--extract-name',
         help='Specify the name of the file to which the data should be extracted. ',
         metavar='FILENAME',
+    ),
+    "possible_timeframes": Arg(
+        '--possible-timeframes',
+        help='Specify the list of timeframes the generator can choose from. ',
+        metavar='LIST',
+    ),
+    "possible_pairs": Arg(
+        '--possible-pairs',
+        help='Specify the list of pairs the generator can choose from. ',
+        metavar='LIST',
+    ),
+    "opt_days_amount": Arg(
+        '--days-amount',
+        help='Specify the amount of days on which the generator should optimize. ',
+        metavar='INT',
+    ),
+    "period_length": Arg(
+        '--period',
+        help='Specify the max number of days into the past from which the data can be chosen. ',
+        metavar='INT',
     ),
     # List exchanges
     "print_one_column": Arg(

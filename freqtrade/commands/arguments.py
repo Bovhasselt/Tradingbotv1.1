@@ -62,6 +62,10 @@ ARGS_EXTRACT_STRATEGY = ["strategy", "extract_name"]
 
 ARGS_BUILD_BUILD_HYPEROPT = ["strategy", "hyperopt"]
 
+ARGS_GENERATE_STRATEGY = ["period_length", "opt_days_amount",
+                          "possible_timeframes", "possible_pairs", "exchange"]
+# Data
+
 ARGS_CONVERT_DATA = ["pairs", "format_from", "format_to", "erase"]
 ARGS_CONVERT_DATA_OHLCV = ARGS_CONVERT_DATA + ["timeframes"]
 
@@ -229,10 +233,16 @@ class Arguments:
 
         # add build-hyperopt subcommand
         build_extracted_hyperopt_cmd = subparsers.add_parser('build-hyperopt',
-                                                     help="Create a hyperopt for a strategy")
+                                                             help="Create a hyperopt for a strategy")
         build_extracted_hyperopt_cmd.set_defaults(func=start_build_hyperopt)
         self._build_args(optionlist=ARGS_BUILD_BUILD_HYPEROPT, parser=build_extracted_hyperopt_cmd)
-
+        """
+        # add generate-strategy subcommand
+        generate_strategy_cmd = subparsers.add_parser('generate-strategy',
+                                                      help="Generate a strategy")
+        generate_strategy_cmd.set_defaults(func=start_generate_strategy)
+        self._build_args(optionlist=ARGS_GENERATE_STRATEGY, parser=generate_strategy_cmd)
+        """
         # add new-strategy subcommand
         build_strategy_cmd = subparsers.add_parser('new-strategy',
                                                    help="Create new strategy")
